@@ -1,0 +1,6 @@
+<library path="lib/libxtion_grabber">
+	<class name="xtion_grabber" type="xtion_grabber::XtionGrabber" base_class_type="nodelet::Nodelet">
+		<description>
+		</description>
+	</class>
+</library>

@@ -1,0 +1,12 @@
+<launch>
+	<!-- Sample launch file for xtion_grabber. This assumes you installed the
+	     udev rules as detailed in README.md. -->
+
+	<!-- The ID of your xtion. You can look this up with dmesg. -->
+	<arg name="ID" default="1210160238" />
+
+	<node name="$(anon xtion_grabber)" pkg="nodelet" type="nodelet" args="standalone xtion_grabber">
+		<param name="color_device" value="/dev/xtion_$(arg ID)_color" />
+		<param name="depth_device" value="/dev/xtion_$(arg ID)_depth" />
+	</node>
+</launch>
