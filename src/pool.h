@@ -1,5 +1,5 @@
 // Pool allocator that provides boost::shared_ptr access
-// Author: Max Schwarz <max.schwarz@uni-bonn.de>
+// Author: Max Schwarz <max.schwarz@online.de>
 
 #ifndef UTILS_POOL_H
 #define UTILS_POOL_H

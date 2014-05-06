@@ -1,5 +1,5 @@
 // Generate pointcloud from depth & rgb image
-// Author: Max Schwarz <max.schwarz@uni-bonn.de>
+// Author: Max Schwarz <max.schwarz@online.de>
 
 #ifndef ACCEL_GENERATE_POINTCLOUD_H
 #define ACCEL_GENERATE_POINTCLOUD_H

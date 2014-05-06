@@ -1,5 +1,5 @@
 // Generate pointcloud from depth & rgb image
-// Author: Max Schwarz <max.schwarz@uni-bonn.de>
+// Author: Max Schwarz <max.schwarz@online.de>
 
 /* FIXME: Currently all optimized variants produce a pointcloud layout which
  * is not compatible with PCL (see generate_pointcloud.s). Therefore, we use
