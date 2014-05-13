@@ -12,6 +12,8 @@
 #include <sensor_msgs/distortion_models.h>
 
 #include <ros/node_handle.h>
+#include <cv_bridge/cv_bridge.h>
+#include <opencv2/photo/photo.hpp>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -81,6 +83,10 @@ bool XtionGrabber::setupDepth(const std::string& device)
 		buffer->buf.memory = V4L2_MEMORY_USERPTR;
 		buffer->buf.m.userptr = (long unsigned int)buffer->image->data.data();
 		buffer->buf.length = buffer->image->data.size();
+
+		NODELET_INFO("buffer data: index %d, m.userptr: %p, length: %u",
+			buffer->buf.index, (void*)buffer->buf.m.userptr, buffer->buf.length
+		);
 
 		if(ioctl(m_depth_fd, VIDIOC_QBUF, &buffer->buf) != 0)
 		{
@@ -231,10 +237,12 @@ void XtionGrabber::onInit()
 	m_colorFocalLength = 525.0f * m_colorWidth / 640;
 
 	m_cloudGenerator.init(m_depthWidth, m_depthHeight, m_depthFocalLength);
+	m_filledCloudGenerator.init(1280, 960, 525.0f * 1280 / 640);
 
 	setupCameraInfo();
 
 	m_pub_cloud = nh.advertise<sensor_msgs::PointCloud2>("cloud", 1);
+	m_pub_filledCloud = nh.advertise<sensor_msgs::PointCloud2>("cloud_filled", 1);
 
 	m_thread = boost::thread(boost::bind(&XtionGrabber::read_thread, this));
 }
@@ -365,15 +373,81 @@ void XtionGrabber::read_thread()
 		}
 
 		if(m_lastColorSeq == m_lastDepthSeq)
-			publishPointCloud();
+		{
+			if(m_pub_cloud.getNumSubscribers() != 0)
+				publishPointCloud(m_lastDepthImage, &m_cloudGenerator, &m_pub_cloud);
+
+			if(m_pub_filledCloud.getNumSubscribers() != 0)
+				publishPointCloud(fillDepth(), &m_filledCloudGenerator, &m_pub_filledCloud);
+		}
 	}
 
 	fprintf(stderr, "read thread exit now\n");
 }
 
-void XtionGrabber::publishPointCloud()
+sensor_msgs::ImageConstPtr XtionGrabber::fillDepth()
 {
-	if(!m_lastColorImage || !m_lastDepthImage)
+	cv_bridge::CvImageConstPtr cv_depth_input = cv_bridge::toCvShare(m_lastDepthImage, "mono16");
+
+	cv::Mat_<uint16_t> cv_depth(960, 1280);
+	for(int y = 0; y < cv_depth.rows; ++y)
+	{
+		for(int x = 0; x < cv_depth.cols; ++x)
+		{
+			cv_depth(y,x) = cv_depth_input->image.at<uint16_t>(
+				y / (cv_depth.rows / cv_depth_input->image.rows),
+				x / (cv_depth.cols / cv_depth_input->image.cols)
+			);
+		}
+	}
+
+	cv::Mat_<uint8_t> cv_depth8(cv_depth.size());
+	cv::Mat_<uint8_t> mask(cv_depth.size(), (uint8_t)0);
+
+	// Fill invalid depth with cv::inpaint
+	for(int y = 0; y < cv_depth.rows; ++y)
+	{
+		for(int x = 0; x < cv_depth.cols; ++x)
+		{
+			cv_depth8(y,x) = cv_depth(y,x) / 10;
+
+			if(cv_depth(y, x) == 0)
+				mask(y,x) = 1;
+		}
+	}
+
+	cv::Mat_<uint8_t> inpaintedDepth(cv_depth.size(), cv_depth.type());
+	cv::inpaint(cv_depth8, mask, inpaintedDepth, 5.0, cv::INPAINT_TELEA);
+
+	cv_bridge::CvImage filledDepth;
+
+	filledDepth.image = cv::Mat(cv_depth.size(), CV_16UC1);
+	filledDepth.encoding = "mono16";
+	filledDepth.header = m_lastDepthImage->header;
+
+	for(int y = 0; y < cv_depth.rows; ++y)
+	{
+		for(int x = 0; x < cv_depth.cols; ++x)
+		{
+			if(mask(y,x))
+				filledDepth.image.at<uint16_t>(y,x) = inpaintedDepth(y,x) * 10;
+			else
+				filledDepth.image.at<uint16_t>(y,x) = cv_depth(y,x);
+		}
+	}
+
+	sensor_msgs::ImageConstPtr out = filledDepth.toImageMsg();
+
+	NODELET_ERROR("filled depth image has dim %dx%d", (int)out->width, (int)out->height);
+
+	return out;
+}
+
+void XtionGrabber::publishPointCloud(const sensor_msgs::ImageConstPtr& depth,
+                                     accel::PointCloudGenerator* generator,
+                                     ros::Publisher* dest)
+{
+	if(!m_lastColorImage || !depth)
 		return;
 
 	sensor_msgs::PointCloud2::Ptr cloud = m_pointCloudPool->create();
@@ -399,8 +473,8 @@ void XtionGrabber::publishPointCloud()
 	cloud->fields[3].datatype = sensor_msgs::PointField::FLOAT32;
 	cloud->fields[3].count = 1;
 
-	cloud->width = m_depthWidth;
-	cloud->height = m_depthHeight;
+	cloud->width = depth->width;
+	cloud->height = depth->height;
 	cloud->is_bigendian = 0;
 	cloud->is_dense = 1;
 	cloud->point_step = 32;
@@ -421,18 +495,16 @@ void XtionGrabber::publishPointCloud()
 		colorOffset = 32 * m_colorWidth;
 	}
 
-	m_cloudGenerator.generatePointCloud(
-		(uint16_t*)m_lastDepthImage->data.data(),
+	generator->generatePointCloud(
+		(uint16_t*)depth->data.data(),
 		(uint32_t*)m_lastColorImage->data.data() + colorOffset,
-		m_colorWidth / m_depthWidth,
+		m_colorWidth / depth->width,
 		cloud->data.data()
 	);
 
 	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
 
-// 	fprintf(stderr, "point cloud generation took %.1f ms\n", (end.tv_nsec - start.tv_nsec) / 1000.0f / 1000.0f);
-
-	m_pub_cloud.publish(cloud);
+	dest->publish(cloud);
 }
 
 void XtionGrabber::setupCameraInfo()

@@ -88,10 +88,15 @@ private:
 	sensor_msgs::ImageConstPtr m_lastDepthImage;
 
 	accel::PointCloudGenerator m_cloudGenerator;
+	accel::PointCloudGenerator m_filledCloudGenerator;
 	ros::Publisher m_pub_cloud;
+	ros::Publisher m_pub_filledCloud;
 	utils::Pool<sensor_msgs::PointCloud2>::Ptr m_pointCloudPool;
 
-	void publishPointCloud();
+	sensor_msgs::ImageConstPtr fillDepth();
+	void publishPointCloud(const sensor_msgs::ImageConstPtr& depth,
+	                       accel::PointCloudGenerator* generator,
+	                       ros::Publisher* dest);
 
 	void read_thread();
 
