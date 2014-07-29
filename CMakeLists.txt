@@ -8,6 +8,7 @@ find_package(catkin REQUIRED COMPONENTS
 	image_transport
 	nodelet
 	cv_bridge
+	camera_info_manager
 	cmake_modules
 )
 
@@ -37,6 +38,7 @@ add_library(xtion_grabber
 	src/xtion_grabber.cpp
 	src/generate_pointcloud.cpp
 	src/generate_pointcloud.s
+	src/depth_filler.cpp
 )
 target_link_libraries(xtion_grabber
 	${catkin_LIBRARIES}

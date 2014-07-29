@@ -11,10 +11,16 @@
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/PointCloud2.h>
 
+#include <camera_info_manager/camera_info_manager.h>
+
+#include <image_transport/image_transport.h>
+#include <image_transport/camera_publisher.h>
+
 #include <ros/publisher.h>
 
 #include "pool.h"
 #include "generate_pointcloud.h"
+#include "depth_filler.h"
 
 const int NUM_BUFS = 31;
 
@@ -44,6 +50,8 @@ private:
 	void setupCameraInfo();
 
 	ros::Publisher m_pub_info;
+
+	boost::shared_ptr<image_transport::ImageTransport> m_it;
 
 	////////////////////////////////////////////////////////////////////////////
 	// Depth channel
@@ -76,8 +84,12 @@ private:
 	ColorBuffer m_color_buffers[NUM_BUFS];
 
 	int m_color_fd;
-	ros::Publisher m_pub_color;
+
+	sensor_msgs::CameraInfo m_camInfo;
+	image_transport::CameraPublisher m_pub_color;
 	utils::Pool<sensor_msgs::Image>::Ptr m_color_pool;
+
+	boost::shared_ptr<camera_info_manager::CameraInfoManager> m_color_infoMgr;
 
 	////////////////////////////////////////////////////////////////////////////
 	// PointCloud generation
@@ -93,7 +105,7 @@ private:
 	ros::Publisher m_pub_filledCloud;
 	utils::Pool<sensor_msgs::PointCloud2>::Ptr m_pointCloudPool;
 
-	sensor_msgs::ImageConstPtr fillDepth();
+	DepthFiller m_depthFiller;
 	void publishPointCloud(const sensor_msgs::ImageConstPtr& depth,
 	                       accel::PointCloudGenerator* generator,
 	                       ros::Publisher* dest);

@@ -113,7 +113,7 @@ void XtionGrabber::stopDepth()
 
 bool XtionGrabber::setupColor(const std::string& device)
 {
-	m_pub_color = getMTPrivateNodeHandle().advertise<sensor_msgs::Image>("color", 1);
+	m_pub_color = m_it->advertiseCamera("rgb", 1);
 
 	m_color_fd = open(device.c_str(), O_RDONLY);
 	if(m_color_fd < 0)
@@ -212,6 +212,8 @@ void XtionGrabber::onInit()
 {
 	ros::NodeHandle& nh = getMTPrivateNodeHandle();
 
+	m_it.reset(new image_transport::ImageTransport(nh));
+
 	std::string depthDevice;
 	std::string colorDevice;
 
@@ -256,6 +258,7 @@ sensor_msgs::ImagePtr XtionGrabber::createDepthImage()
 	img->height = m_depthHeight;
 	img->step = img->width * 2;
 	img->data.resize(img->step * img->height);
+	img->header.frame_id = "/camera_optical";
 
 	return img;
 }
@@ -316,6 +319,7 @@ void XtionGrabber::read_thread()
 			img->step = img->width * 4;
 			img->data.resize(img->step * img->height);
 			img->header.stamp = timeFromTimeval(buf.timestamp);
+			img->header.frame_id = "/camera_optical";
 
 			img->encoding = sensor_msgs::image_encodings::BGRA8;
 
@@ -328,7 +332,9 @@ void XtionGrabber::read_thread()
 
 			m_lastColorImage = img;
 			m_lastColorSeq = buf.sequence;
-			m_pub_color.publish(img);
+
+			m_camInfo.header.stamp = img->header.stamp;
+			m_pub_color.publish(img, boost::make_shared<sensor_msgs::CameraInfo>(m_camInfo));
 
 			if(ioctl(m_color_fd, VIDIOC_QBUF, &buffer->buf) != 0)
 			{
@@ -378,70 +384,75 @@ void XtionGrabber::read_thread()
 				publishPointCloud(m_lastDepthImage, &m_cloudGenerator, &m_pub_cloud);
 
 			if(m_pub_filledCloud.getNumSubscribers() != 0)
-				publishPointCloud(fillDepth(), &m_filledCloudGenerator, &m_pub_filledCloud);
+			{
+				sensor_msgs::ImagePtr filledDepth = m_depthFiller.fillDepth(
+					m_lastDepthImage, m_lastColorImage
+				);
+				publishPointCloud(filledDepth, &m_filledCloudGenerator, &m_pub_filledCloud);
+			}
 		}
 	}
 
 	fprintf(stderr, "read thread exit now\n");
 }
 
-sensor_msgs::ImageConstPtr XtionGrabber::fillDepth()
-{
-	cv_bridge::CvImageConstPtr cv_depth_input = cv_bridge::toCvShare(m_lastDepthImage, "mono16");
-
-	cv::Mat_<uint16_t> cv_depth(960, 1280);
-	for(int y = 0; y < cv_depth.rows; ++y)
-	{
-		for(int x = 0; x < cv_depth.cols; ++x)
-		{
-			cv_depth(y,x) = cv_depth_input->image.at<uint16_t>(
-				y / (cv_depth.rows / cv_depth_input->image.rows),
-				x / (cv_depth.cols / cv_depth_input->image.cols)
-			);
-		}
-	}
-
-	cv::Mat_<uint8_t> cv_depth8(cv_depth.size());
-	cv::Mat_<uint8_t> mask(cv_depth.size(), (uint8_t)0);
-
-	// Fill invalid depth with cv::inpaint
-	for(int y = 0; y < cv_depth.rows; ++y)
-	{
-		for(int x = 0; x < cv_depth.cols; ++x)
-		{
-			cv_depth8(y,x) = cv_depth(y,x) / 10;
-
-			if(cv_depth(y, x) == 0)
-				mask(y,x) = 1;
-		}
-	}
-
-	cv::Mat_<uint8_t> inpaintedDepth(cv_depth.size(), cv_depth.type());
-	cv::inpaint(cv_depth8, mask, inpaintedDepth, 5.0, cv::INPAINT_TELEA);
-
-	cv_bridge::CvImage filledDepth;
-
-	filledDepth.image = cv::Mat(cv_depth.size(), CV_16UC1);
-	filledDepth.encoding = "mono16";
-	filledDepth.header = m_lastDepthImage->header;
-
-	for(int y = 0; y < cv_depth.rows; ++y)
-	{
-		for(int x = 0; x < cv_depth.cols; ++x)
-		{
-			if(mask(y,x))
-				filledDepth.image.at<uint16_t>(y,x) = inpaintedDepth(y,x) * 10;
-			else
-				filledDepth.image.at<uint16_t>(y,x) = cv_depth(y,x);
-		}
-	}
-
-	sensor_msgs::ImageConstPtr out = filledDepth.toImageMsg();
-
-	NODELET_ERROR("filled depth image has dim %dx%d", (int)out->width, (int)out->height);
-
-	return out;
-}
+// sensor_msgs::ImageConstPtr XtionGrabber::fillDepth()
+// {
+// 	cv_bridge::CvImageConstPtr cv_depth_input = cv_bridge::toCvShare(m_lastDepthImage, "mono16");
+//
+// 	cv::Mat_<uint16_t> cv_depth(960, 1280);
+// 	for(int y = 0; y < cv_depth.rows; ++y)
+// 	{
+// 		for(int x = 0; x < cv_depth.cols; ++x)
+// 		{
+// 			cv_depth(y,x) = cv_depth_input->image.at<uint16_t>(
+// 				y / (cv_depth.rows / cv_depth_input->image.rows),
+// 				x / (cv_depth.cols / cv_depth_input->image.cols)
+// 			);
+// 		}
+// 	}
+//
+// 	cv::Mat_<uint8_t> cv_depth8(cv_depth.size());
+// 	cv::Mat_<uint8_t> mask(cv_depth.size(), (uint8_t)0);
+//
+// 	// Fill invalid depth with cv::inpaint
+// 	for(int y = 0; y < cv_depth.rows; ++y)
+// 	{
+// 		for(int x = 0; x < cv_depth.cols; ++x)
+// 		{
+// 			cv_depth8(y,x) = cv_depth(y,x) / 10;
+//
+// 			if(cv_depth(y, x) == 0)
+// 				mask(y,x) = 1;
+// 		}
+// 	}
+//
+// 	cv::Mat_<uint8_t> inpaintedDepth(cv_depth.size(), cv_depth.type());
+// 	cv::inpaint(cv_depth8, mask, inpaintedDepth, 5.0, cv::INPAINT_TELEA);
+//
+// 	cv_bridge::CvImage filledDepth;
+//
+// 	filledDepth.image = cv::Mat(cv_depth.size(), CV_16UC1);
+// 	filledDepth.encoding = "mono16";
+// 	filledDepth.header = m_lastDepthImage->header;
+//
+// 	for(int y = 0; y < cv_depth.rows; ++y)
+// 	{
+// 		for(int x = 0; x < cv_depth.cols; ++x)
+// 		{
+// 			if(mask(y,x))
+// 				filledDepth.image.at<uint16_t>(y,x) = inpaintedDepth(y,x) * 10;
+// 			else
+// 				filledDepth.image.at<uint16_t>(y,x) = cv_depth(y,x);
+// 		}
+// 	}
+//
+// 	sensor_msgs::ImageConstPtr out = filledDepth.toImageMsg();
+//
+// 	NODELET_ERROR("filled depth image has dim %dx%d", (int)out->width, (int)out->height);
+//
+// 	return out;
+// }
 
 void XtionGrabber::publishPointCloud(const sensor_msgs::ImageConstPtr& depth,
                                      accel::PointCloudGenerator* generator,
@@ -509,37 +520,66 @@ void XtionGrabber::publishPointCloud(const sensor_msgs::ImageConstPtr& depth,
 
 void XtionGrabber::setupCameraInfo()
 {
-	sensor_msgs::CameraInfoPtr info = boost::make_shared<sensor_msgs::CameraInfo>();
+	std::string info_url;
+	getPrivateNodeHandle().param("rgb_info_url", info_url, std::string(""));
 
-	/* We are reporting information about the *color* sensor here. */
+	v4l2_capability caps;
+	memset(&caps, 0, sizeof(caps));
+	if(ioctl(m_color_fd, VIDIOC_QUERYCAP, &caps) != 0)
+	{
+		perror("Could not get camera information");
+		return;
+	}
 
-	info->width = m_colorWidth;
-	info->height = m_colorHeight;
+	std::string card((const char*)caps.card);
+	std::replace(card.begin(), card.end(), ' ', '_');
+	card.erase(std::remove(card.begin(), card.end(), ':'));
 
-	// No distortion
-	info->D.resize(5, 0.0);
-	info->distortion_model = sensor_msgs::distortion_models::PLUMB_BOB;
+	std::stringstream ss;
+	ss << card << "_" << m_colorWidth;
 
-	// Simple camera matrix: square pixels (fx = fy), principal point at center
-	info->K.assign(0.0);
-	info->K[0] = info->K[4] = m_colorFocalLength;
-	info->K[2] = (m_colorWidth /2.0) - 0.5;
-	info->K[5] = (m_colorHeight/2.0) - 0.5;
-	info->K[8] = 1.0;
+	m_color_infoMgr.reset(
+		new camera_info_manager::CameraInfoManager(
+			getPrivateNodeHandle(), ss.str(), info_url
+		)
+	);
 
-	// No separate rectified image plane, so R = I
-	info->R.assign(0.0);
-	info->R[0] = info->R[4] = info->R[8] = 1.0;
+	if(m_color_infoMgr->isCalibrated())
+	{
+		ROS_INFO("Using saved calibration...");
+		m_camInfo = m_color_infoMgr->getCameraInfo();
+	}
+	else
+	{
+		/* We are reporting information about the *color* sensor here. */
 
-	// Then P=K(I|0) = (K|0)
-	info->P.assign(0.0);
-	info->P[0] = info->P[5] = m_colorFocalLength; // fx, fy
-	info->P[2] = info->K[2]; // cx
-	info->P[6] = info->K[5]; // cy
-	info->P[10] = 1.0;
+		m_camInfo.width = m_colorWidth;
+		m_camInfo.height = m_colorHeight;
 
-	m_pub_info = getPrivateNodeHandle().advertise<sensor_msgs::CameraInfo>("camera_info", 1, true);
-	m_pub_info.publish(info);
+		// No distortion
+		m_camInfo.D.resize(5, 0.0);
+		m_camInfo.distortion_model = sensor_msgs::distortion_models::PLUMB_BOB;
+
+		// Simple camera matrix: square pixels (fx = fy), principal point at center
+		m_camInfo.K.assign(0.0);
+		m_camInfo.K[0] = m_camInfo.K[4] = m_colorFocalLength;
+		m_camInfo.K[2] = (m_colorWidth /2.0) - 0.5;
+		m_camInfo.K[5] = (m_colorHeight/2.0) - 0.5;
+		m_camInfo.K[8] = 1.0;
+
+		// No separate rectified image plane, so R = I
+		m_camInfo.R.assign(0.0);
+		m_camInfo.R[0] = m_camInfo.R[4] = m_camInfo.R[8] = 1.0;
+
+		// Then P=K(I|0) = (K|0)
+		m_camInfo.P.assign(0.0);
+		m_camInfo.P[0] = m_camInfo.P[5] = m_colorFocalLength; // fx, fy
+		m_camInfo.P[2] = m_camInfo.K[2]; // cx
+		m_camInfo.P[6] = m_camInfo.K[5]; // cy
+		m_camInfo.P[10] = 1.0;
+	}
+
+	m_camInfo.header.frame_id = "/camera_optical";
 }
 
 }
