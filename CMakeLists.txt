@@ -1,4 +1,6 @@
 
+cmake_minimum_required(VERSION 2.8)
+
 project(xtion_grabber)
 
 find_package(catkin REQUIRED COMPONENTS
@@ -6,9 +8,12 @@ find_package(catkin REQUIRED COMPONENTS
 	image_transport
 	nodelet
 	cv_bridge
+	cmake_modules
 )
 
 include_directories(${catkin_INCLUDE_DIRS})
+
+catkin_package()
 
 set(CMAKE_CXX_FLAGS "-Wall -g -march=native -std=c++11")
 
