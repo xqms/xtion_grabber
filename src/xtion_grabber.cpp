@@ -267,7 +267,7 @@ ros::Time timeFromTimeval(const struct timeval& tv)
 
 	ros::Time current_time = ros::Time::now();
 
-	int64_t nsec_diff = (current_monotonic.tv_sec - tv.tv_sec) * 1000000000L + current_monotonic.tv_nsec - tv.tv_usec/1000L;
+	int64_t nsec_diff = (current_monotonic.tv_sec - tv.tv_sec) * 1000000000LL + current_monotonic.tv_nsec - tv.tv_usec*1000L;
 
 	return ros::Time(
 		current_time.sec + nsec_diff / 1000000000L,
