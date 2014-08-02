@@ -4,8 +4,9 @@
 
 	<!-- The ID of your xtion. You can look this up with dmesg. -->
 	<arg name="ID" default="1210160238" />
+	<arg name="name" default="xtion" />
 
-	<node name="$(anon xtion_grabber)" pkg="nodelet" type="nodelet" args="standalone xtion_grabber">
+	<node name="$(arg name)" pkg="nodelet" type="nodelet" args="standalone xtion_grabber" output="screen">
 		<param name="color_device" value="/dev/xtion_$(arg ID)_color" />
 		<param name="depth_device" value="/dev/xtion_$(arg ID)_depth" />
 
