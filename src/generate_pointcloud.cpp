@@ -34,7 +34,6 @@ void PointCloudGenerator::init(int width, int height, float f)
 
 	m_constant = 1.0f / 1000.0f / f;
 
-	fprintf(stderr, "Filling XLUT\n");
 	for(int x = 0; x < width; ++x)
 	{
 		m_xlut[x] = (x - (0.5f*width - 0.5f)) * m_constant;

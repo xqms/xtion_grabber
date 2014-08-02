@@ -84,10 +84,6 @@ bool XtionGrabber::setupDepth(const std::string& device)
 		buffer->buf.m.userptr = (long unsigned int)buffer->image->data.data();
 		buffer->buf.length = buffer->image->data.size();
 
-		NODELET_INFO("buffer data: index %d, m.userptr: %p, length: %u",
-			buffer->buf.index, (void*)buffer->buf.m.userptr, buffer->buf.length
-		);
-
 		if(ioctl(m_depth_fd, VIDIOC_QBUF, &buffer->buf) != 0)
 		{
 			perror("Could not queue buffer");
@@ -246,6 +242,7 @@ void XtionGrabber::onInit()
 	m_pub_cloud = nh.advertise<sensor_msgs::PointCloud2>("cloud", 1);
 	m_pub_filledCloud = nh.advertise<sensor_msgs::PointCloud2>("cloud_filled", 1);
 
+	NODELET_INFO("Starting streaming...");
 	m_thread = boost::thread(boost::bind(&XtionGrabber::read_thread, this));
 }
 
