@@ -50,7 +50,11 @@ XtionGrabber::~XtionGrabber()
 
 bool XtionGrabber::setupDepth(const std::string& device)
 {
-	m_pub_depth = getMTPrivateNodeHandle().advertise<sensor_msgs::Image>("depth", 1);
+	ros::NodeHandle depth_nh(getPrivateNodeHandle(), "depth");
+
+	m_depth_it.reset(new image_transport::ImageTransport(depth_nh));
+
+	m_pub_depth = m_depth_it->advertiseCamera("image_raw", 1);
 
 	m_depth_fd = open(device.c_str(), O_RDONLY);
 	if(m_depth_fd < 0)
@@ -109,7 +113,11 @@ void XtionGrabber::stopDepth()
 
 bool XtionGrabber::setupColor(const std::string& device)
 {
-	m_pub_color = m_it->advertiseCamera("rgb", 1);
+	ros::NodeHandle color_nh(getPrivateNodeHandle(), "rgb");
+
+	m_color_it.reset(new image_transport::ImageTransport(color_nh));
+
+	m_pub_color = m_color_it->advertiseCamera("image_raw", 1);
 
 	m_color_fd = open(device.c_str(), O_RDONLY);
 	if(m_color_fd < 0)
@@ -208,8 +216,6 @@ void XtionGrabber::onInit()
 {
 	ros::NodeHandle& nh = getMTPrivateNodeHandle();
 
-	m_it.reset(new image_transport::ImageTransport(nh));
-
 	std::string depthDevice;
 	std::string colorDevice;
 
@@ -225,19 +231,25 @@ void XtionGrabber::onInit()
 	nh.param("color_width", m_colorWidth, 1280);
 	nh.param("color_height", m_colorHeight, 1024);
 
+	m_deviceName = getPrivateNodeHandle().getNamespace();
+
 	if(!setupColor(colorDevice))
 		throw std::runtime_error("Could not setup color channel");
 
 	if(!setupDepth(depthDevice))
 		throw std::runtime_error("Could not setup depth channel");
 
-	m_depthFocalLength = 525.0f * m_depthWidth / 640;
 	m_colorFocalLength = 525.0f * m_colorWidth / 640;
+
+	// The depth sensor actually has a different focal length, but since
+	// we are using hw registration, the rgb focal length applies.
+	m_depthFocalLength = 525.0f * m_depthWidth / 640;
 
 	m_cloudGenerator.init(m_depthWidth, m_depthHeight, m_depthFocalLength);
 	m_filledCloudGenerator.init(1280, 960, 525.0f * 1280 / 640);
 
-	setupCameraInfo();
+	setupRGBInfo();
+	setupDepthInfo();
 
 	m_pub_cloud = nh.advertise<sensor_msgs::PointCloud2>("cloud", 1);
 	m_pub_filledCloud = nh.advertise<sensor_msgs::PointCloud2>("cloud_filled", 1);
@@ -330,8 +342,8 @@ void XtionGrabber::read_thread()
 			m_lastColorImage = img;
 			m_lastColorSeq = buf.sequence;
 
-			m_camInfo.header.stamp = img->header.stamp;
-			m_pub_color.publish(img, boost::make_shared<sensor_msgs::CameraInfo>(m_camInfo));
+			m_color_info.header.stamp = img->header.stamp;
+			m_pub_color.publish(img, boost::make_shared<sensor_msgs::CameraInfo>(m_color_info));
 
 			if(ioctl(m_color_fd, VIDIOC_QBUF, &buffer->buf) != 0)
 			{
@@ -361,7 +373,9 @@ void XtionGrabber::read_thread()
 
 			m_lastDepthImage = buffer->image;
 			m_lastDepthSeq = buf.sequence;
-			m_pub_depth.publish(buffer->image);
+
+			m_depth_info.header.stamp = buffer->image->header.stamp;
+			m_pub_depth.publish(buffer->image, boost::make_shared<sensor_msgs::CameraInfo>(m_depth_info));
 
 			buffer->image.reset();
 
@@ -515,10 +529,12 @@ void XtionGrabber::publishPointCloud(const sensor_msgs::ImageConstPtr& depth,
 	dest->publish(cloud);
 }
 
-void XtionGrabber::setupCameraInfo()
+void XtionGrabber::setupRGBInfo()
 {
+	ros::NodeHandle color_nh(getPrivateNodeHandle(), "rgb");
+
 	std::string info_url;
-	getPrivateNodeHandle().param("rgb_info_url", info_url, std::string(""));
+	getPrivateNodeHandle().param("info_url", info_url, std::string(""));
 
 	v4l2_capability caps;
 	memset(&caps, 0, sizeof(caps));
@@ -537,46 +553,112 @@ void XtionGrabber::setupCameraInfo()
 
 	m_color_infoMgr.reset(
 		new camera_info_manager::CameraInfoManager(
-			getPrivateNodeHandle(), ss.str(), info_url
+			color_nh, ss.str(), info_url
 		)
 	);
 
 	if(m_color_infoMgr->isCalibrated())
 	{
 		ROS_INFO("Using saved calibration...");
-		m_camInfo = m_color_infoMgr->getCameraInfo();
+		m_color_info = m_color_infoMgr->getCameraInfo();
 	}
 	else
 	{
 		/* We are reporting information about the *color* sensor here. */
 
-		m_camInfo.width = m_colorWidth;
-		m_camInfo.height = m_colorHeight;
+		m_color_info.width = m_colorWidth;
+		m_color_info.height = m_colorHeight;
 
 		// No distortion
-		m_camInfo.D.resize(5, 0.0);
-		m_camInfo.distortion_model = sensor_msgs::distortion_models::PLUMB_BOB;
+		m_color_info.D.resize(5, 0.0);
+		m_color_info.distortion_model = sensor_msgs::distortion_models::PLUMB_BOB;
 
 		// Simple camera matrix: square pixels (fx = fy), principal point at center
-		m_camInfo.K.assign(0.0);
-		m_camInfo.K[0] = m_camInfo.K[4] = m_colorFocalLength;
-		m_camInfo.K[2] = (m_colorWidth /2.0) - 0.5;
-		m_camInfo.K[5] = (m_colorHeight/2.0) - 0.5;
-		m_camInfo.K[8] = 1.0;
+		m_color_info.K.assign(0.0);
+		m_color_info.K[0] = m_color_info.K[4] = m_colorFocalLength;
+		m_color_info.K[2] = (m_colorWidth /2.0) - 0.5;
+		m_color_info.K[5] = (m_colorHeight/2.0) - 0.5;
+		m_color_info.K[8] = 1.0;
 
 		// No separate rectified image plane, so R = I
-		m_camInfo.R.assign(0.0);
-		m_camInfo.R[0] = m_camInfo.R[4] = m_camInfo.R[8] = 1.0;
+		m_color_info.R.assign(0.0);
+		m_color_info.R[0] = m_color_info.R[4] = m_color_info.R[8] = 1.0;
 
 		// Then P=K(I|0) = (K|0)
-		m_camInfo.P.assign(0.0);
-		m_camInfo.P[0] = m_camInfo.P[5] = m_colorFocalLength; // fx, fy
-		m_camInfo.P[2] = m_camInfo.K[2]; // cx
-		m_camInfo.P[6] = m_camInfo.K[5]; // cy
-		m_camInfo.P[10] = 1.0;
+		m_color_info.P.assign(0.0);
+		m_color_info.P[0] = m_color_info.P[5] = m_colorFocalLength; // fx, fy
+		m_color_info.P[2] = m_color_info.K[2]; // cx
+		m_color_info.P[6] = m_color_info.K[5]; // cy
+		m_color_info.P[10] = 1.0;
 	}
 
-	m_camInfo.header.frame_id = "/camera_optical";
+	m_color_info.header.frame_id = m_deviceName + "/rgb_optical";
+}
+
+void XtionGrabber::setupDepthInfo()
+{
+	ros::NodeHandle depth_nh(getPrivateNodeHandle(), "depth");
+
+	std::string info_url;
+	getPrivateNodeHandle().param("info_url", info_url, std::string(""));
+
+	v4l2_capability caps;
+	memset(&caps, 0, sizeof(caps));
+	if(ioctl(m_depth_fd, VIDIOC_QUERYCAP, &caps) != 0)
+	{
+		perror("Could not get camera information");
+		return;
+	}
+
+	std::string card((const char*)caps.card);
+	std::replace(card.begin(), card.end(), ' ', '_');
+	card.erase(std::remove(card.begin(), card.end(), ':'));
+
+	std::stringstream ss;
+	ss << card << "_" << m_depthWidth;
+
+	m_depth_infoMgr.reset(
+		new camera_info_manager::CameraInfoManager(
+			depth_nh, ss.str(), info_url
+		)
+	);
+
+	if(m_depth_infoMgr->isCalibrated())
+	{
+		ROS_INFO("Using saved calibration...");
+		m_depth_info = m_depth_infoMgr->getCameraInfo();
+	}
+	else
+	{
+		/* We are reporting information about the *depth* sensor here. */
+
+		m_depth_info.width = m_depthWidth;
+		m_depth_info.height = m_depthHeight;
+
+		// No distortion
+		m_depth_info.D.resize(5, 0.0);
+		m_depth_info.distortion_model = sensor_msgs::distortion_models::PLUMB_BOB;
+
+		// Simple camera matrix: square pixels (fx = fy), principal point at center
+		m_depth_info.K.assign(0.0);
+		m_depth_info.K[0] = m_depth_info.K[4] = m_depthFocalLength;
+		m_depth_info.K[2] = (m_depthWidth /2.0) - 0.5;
+		m_depth_info.K[5] = (m_depthHeight/2.0) - 0.5;
+		m_depth_info.K[8] = 1.0;
+
+		// No separate rectified image plane, so R = I
+		m_depth_info.R.assign(0.0);
+		m_depth_info.R[0] = m_depth_info.R[4] = m_depth_info.R[8] = 1.0;
+
+		// Then P=K(I|0) = (K|0)
+		m_depth_info.P.assign(0.0);
+		m_depth_info.P[0] = m_depth_info.P[5] = m_depthFocalLength; // fx, fy
+		m_depth_info.P[2] = m_depth_info.K[2]; // cx
+		m_depth_info.P[6] = m_depth_info.K[5]; // cy
+		m_depth_info.P[10] = 1.0;
+	}
+
+	m_depth_info.header.frame_id = m_deviceName + "/rgb_optical";
 }
 
 }

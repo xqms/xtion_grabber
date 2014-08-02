@@ -45,13 +45,12 @@ private:
 	double m_depthFocalLength;
 	double m_colorFocalLength;
 
+	std::string m_deviceName;
+
 	////////////////////////////////////////////////////////////////////////////
 	// Camera info
-	void setupCameraInfo();
-
-	ros::Publisher m_pub_info;
-
-	boost::shared_ptr<image_transport::ImageTransport> m_it;
+	void setupRGBInfo();
+	void setupDepthInfo();
 
 	////////////////////////////////////////////////////////////////////////////
 	// Depth channel
@@ -66,10 +65,15 @@ private:
 		v4l2_buffer buf;
 	};
 	DepthBuffer m_depth_buffers[NUM_BUFS];
-	int m_depth_fd;
-	ros::Publisher m_pub_depth;
 
+	int m_depth_fd;
+
+	boost::shared_ptr<image_transport::ImageTransport> m_depth_it;
+	sensor_msgs::CameraInfo m_depth_info;
+	image_transport::CameraPublisher m_pub_depth;
 	utils::Pool<sensor_msgs::Image>::Ptr m_depth_pool;
+
+	boost::shared_ptr<camera_info_manager::CameraInfoManager> m_depth_infoMgr;
 
 	////////////////////////////////////////////////////////////////////////////
 	// Color channel
@@ -85,7 +89,8 @@ private:
 
 	int m_color_fd;
 
-	sensor_msgs::CameraInfo m_camInfo;
+	boost::shared_ptr<image_transport::ImageTransport> m_color_it;
+	sensor_msgs::CameraInfo m_color_info;
 	image_transport::CameraPublisher m_pub_color;
 	utils::Pool<sensor_msgs::Image>::Ptr m_color_pool;
 
