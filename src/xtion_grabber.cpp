@@ -262,7 +262,7 @@ sensor_msgs::ImagePtr XtionGrabber::createDepthImage()
 {
 	sensor_msgs::ImagePtr img = m_depth_pool->create();
 
-	img->encoding = sensor_msgs::image_encodings::MONO16;
+	img->encoding = sensor_msgs::image_encodings::TYPE_16UC1;
 	img->width = m_depthWidth;
 	img->height = m_depthHeight;
 	img->step = img->width * 2;
