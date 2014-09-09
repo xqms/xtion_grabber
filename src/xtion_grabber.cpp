@@ -21,10 +21,34 @@
 
 #include <linux/videodev2.h>
 
+#if HAVE_LIBYUV
 #include <libyuv.h>
+#endif
 
 namespace xtion_grabber
 {
+
+inline uint32_t yuv(float y, float u, float v)
+{
+	int b = y + (u-128) / 0.493;
+	int r = y + (v-128) / 0.877;
+	int g = 1.7*y - 0.509*r - 0.194*b;
+
+	if(r < 0)
+			r = 0;
+	if(r > 255)
+			r = 255;
+	if(g < 0)
+			g = 0;
+	if(g > 255)
+			g = 255;
+	if(b < 0)
+			b = 0;
+	if(b > 255)
+			b = 255;
+
+	return b | (g << 8) | (r << 16) | (0xFF << 24);
+}
 
 XtionGrabber::XtionGrabber()
  : m_lastColorSeq(-1)
@@ -332,12 +356,34 @@ void XtionGrabber::read_thread()
 
 			img->encoding = sensor_msgs::image_encodings::BGRA8;
 
+#if HAVE_LIBYUV
 			libyuv::ConvertToARGB(
 				buffer->data.data(), buffer->data.size(),
 				img->data.data(),
 				m_colorWidth*4, 0, 0, m_colorWidth, m_colorHeight, m_colorWidth, m_colorHeight,
 				libyuv::kRotate0, libyuv::FOURCC_UYVY
 			);
+#else
+			uint32_t* dptr = (uint32_t*)img->data.data();
+
+			for(size_t y = 0; y < img->height; ++y)
+			{
+					for(size_t x = 0; x < img->width-1; x += 2)
+					{
+							unsigned char* base = &buffer->data[y*m_colorWidth*2+x*2];
+							float y1 = base[1];
+							float u  = base[0];
+							float y2 = base[3];
+							float v  = base[2];
+
+							uint32_t rgb1 = yuv(y1, u, v);
+							uint32_t rgb2 = yuv(y2, u, v);
+
+							dptr[y*img->width + x + 0] = rgb1;
+							dptr[y*img->width + x + 1] = rgb2;
+					}
+			}
+#endif
 
 			m_lastColorImage = img;
 			m_lastColorSeq = buf.sequence;

@@ -21,15 +21,15 @@ set(CMAKE_CXX_FLAGS "-Wall -g -march=native -std=c++11")
 find_path(LIBYUV_INCLUDE_DIR libyuv.h)
 find_library(LIBYUV_LIBRARY yuv)
 
-if(NOT LIBYUV_INCLUDE_DIR)
-	message(WARNING "libyuv not found, not building xtion_grabber")
-	return()
+if(LIBYUV_INCLUDE_DIR)
+	include_directories(${LIBYUV_INCLUDE_DIR})
+	add_definitions(-DHAVE_LIBYUV=1)
+
+	set(LIBYUV_LIBRARIES ${LIBYUV_LIBRARY})
 endif()
 
 find_package(Eigen REQUIRED)
 include_directories(${Eigen_INCLUDE_DIRS})
-
-include_directories(${LIBYUV_INCLUDE_DIR})
 
 enable_language(ASM)
 set_property(SOURCE src/generate_pointcloud.s PROPERTY LANGUAGE ASM)
@@ -42,5 +42,5 @@ add_library(xtion_grabber
 )
 target_link_libraries(xtion_grabber
 	${catkin_LIBRARIES}
-	${LIBYUV_LIBRARY}
+	${LIBYUV_LIBRARIES}
 )
