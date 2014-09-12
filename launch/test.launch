@@ -10,7 +10,7 @@
 		<param name="color_device" value="/dev/xtion_$(arg ID)_color" />
 		<param name="depth_device" value="/dev/xtion_$(arg ID)_depth" />
 
-		<param name="color_width" value="1280" />
-		<param name="color_height" value="1024" />
+		<param name="color_width" value="640" />
+		<param name="color_height" value="480" />
 	</node>
 </launch>
