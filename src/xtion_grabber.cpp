@@ -250,6 +250,8 @@ void XtionGrabber::onInit()
 		throw std::runtime_error("depth_device and color_device parameters are mandatory!");
 	}
 
+	nh.param("frame", m_frameName, std::string("camera_optical"));
+
 	nh.param("depth_width", m_depthWidth, 640);
 	nh.param("depth_height", m_depthHeight, 480);
 	nh.param("color_width", m_colorWidth, 1280);
@@ -291,7 +293,7 @@ sensor_msgs::ImagePtr XtionGrabber::createDepthImage()
 	img->height = m_depthHeight;
 	img->step = img->width * 2;
 	img->data.resize(img->step * img->height);
-	img->header.frame_id = "/camera_optical";
+	img->header.frame_id = m_frameName;
 
 	return img;
 }
@@ -352,7 +354,7 @@ void XtionGrabber::read_thread()
 			img->step = img->width * 4;
 			img->data.resize(img->step * img->height);
 			img->header.stamp = timeFromTimeval(buf.timestamp);
-			img->header.frame_id = "/camera_optical";
+			img->header.frame_id = m_frameName;
 
 			img->encoding = sensor_msgs::image_encodings::BGRA8;
 
@@ -521,7 +523,7 @@ void XtionGrabber::publishPointCloud(const sensor_msgs::ImageConstPtr& depth,
 	sensor_msgs::PointCloud2::Ptr cloud = m_pointCloudPool->create();
 
 	cloud->header.stamp = m_lastColorImage->header.stamp;
-	cloud->header.frame_id = "/camera_optical";
+	cloud->header.frame_id = m_frameName;
 
 	cloud->fields.resize(4);
 	cloud->fields[0].name = "x";

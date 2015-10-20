@@ -46,6 +46,7 @@ private:
 	double m_colorFocalLength;
 
 	std::string m_deviceName;
+	std::string m_frameName;
 
 	////////////////////////////////////////////////////////////////////////////
 	// Camera info
