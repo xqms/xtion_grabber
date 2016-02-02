@@ -204,7 +204,7 @@ void PointCloudGenerator::generatePointCloud(const uint16_t* __restrict depth, c
 }
 
 #else
-#warning No SSE available, using slow version
+//#warning No SSE available, using slow version
 
 // Dumb implementation
 void PointCloudGenerator::generatePointCloud(const uint16_t* __restrict depth_ptr, const uint32_t* __restrict color, unsigned int color_step, uint8_t* __restrict output)
